@@ -19,6 +19,11 @@
                         <field name="company_id" groups="base.group_multi_company"/>
                     </tree>
                 </field>
+                <!-- attrs="{'invisible': [('new_group_ids', '=', False)]}" -->
+                <group string="Changes">
+                    <field name="added_group_ids" widget="many2many_tags"/>
+                    <field name="removed_group_ids" widget="many2many_tags"/>
+                </group>
             </page>
         </xpath>
     </field>

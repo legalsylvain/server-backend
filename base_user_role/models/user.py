@@ -18,6 +18,21 @@ class ResUsers(models.Model):
         compute="_compute_role_ids",
     )
 
+    added_group_ids = fields.Many2many(
+        comodel_name="res.groups",
+        compute="_compute_added_removed_group_ids",
+        string="Groups to add",
+        help="New groups that will be added, when applying role changes",
+    )
+
+    removed_group_ids = fields.Many2many(
+        comodel_name="res.groups",
+        compute="_compute_added_removed_group_ids",
+        string="Groups to remove",
+        help="Obsolete groups that will be removed, when applying role"
+        " changes",
+    )
+
     @api.model
     def _default_role_lines(self):
         default_user = self.env.ref(
@@ -34,6 +49,18 @@ class ResUsers(models.Model):
                     }
                 )
         return default_values
+
+    @api.multi
+    @api.depends("role_line_ids.is_enabled", "groups_id")
+    def _compute_added_removed_group_ids(self):
+        role_groups_dict = self._get_role_groups_dict()
+        for user in self.filtered(lambda x: x.role_line_ids):
+            groups_to_add, groups_to_remove = user._get_group_changes(
+                role_groups_dict)
+            user.added_group_ids = groups_to_add
+            user.removed_group_ids = groups_to_remove
+            print(groups_to_add)
+            print(groups_to_remove)
 
     @api.multi
     @api.depends("role_line_ids.role_id")
@@ -67,34 +94,52 @@ class ResUsers(models.Model):
         If no role is defined on the user, its groups are let untouched unless
         the `force` parameter is `True`.
         """
-        role_groups = {}
         # We obtain all the groups associated to each role first, so that
         # it is faster to compare later with each user's groups.
-        for role in self.mapped("role_line_ids.role_id"):
-            role_groups[role] = list(
-                set(
-                    role.group_id.ids
-                    + role.implied_ids.ids
-                    + role.trans_implied_ids.ids
-                )
-            )
+        role_groups_dict = self._get_role_groups_dict()
+
         for user in self:
+            print("set_groups_from_roles")
+            print(user.role_line_ids)
+            print(force)
             if not user.role_line_ids and not force:
                 continue
-            group_ids = []
-            for role_line in user._get_applicable_roles():
-                role = role_line.role_id
-                if role:
-                    group_ids += role_groups[role]
-            group_ids = list(set(group_ids))  # Remove duplicates IDs
-            groups_to_add = list(set(group_ids) - set(user.groups_id.ids))
-            groups_to_remove = list(set(user.groups_id.ids) - set(group_ids))
+            print("QUAND MEME")
+            groups_to_add, groups_to_remove = user._get_group_changes(
+                role_groups_dict)
             to_add = [(4, gr) for gr in groups_to_add]
             to_remove = [(3, gr) for gr in groups_to_remove]
             groups = to_remove + to_add
+            print("===============")
+            print(groups)
+            print("===============")
             if groups:
                 vals = {
                     "groups_id": groups,
                 }
                 super(ResUsers, user).write(vals)
         return True
+
+    def _get_role_groups_dict(self):
+        role_groups_dict = {}
+        for role in self.mapped("role_line_ids.role_id"):
+            role_groups_dict[role] = list(
+                set(
+                    role.group_id.ids
+                    + role.implied_ids.ids
+                    + role.trans_implied_ids.ids
+                )
+            )
+        return role_groups_dict
+
+    def _get_group_changes(self, role_groups_dict):
+        self.ensure_one()
+        group_ids = []
+        for role_line in self._get_applicable_roles():
+            role = role_line.role_id
+            if role:
+                group_ids += role_groups_dict[role]
+        group_ids = list(set(group_ids))  # Remove duplicates IDs
+        groups_to_add = list(set(group_ids) - set(self.groups_id.ids))
+        groups_to_remove = list(set(self.groups_id.ids) - set(group_ids))
+        return groups_to_add, groups_to_remove
